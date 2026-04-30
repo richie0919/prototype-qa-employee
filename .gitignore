@@ -22,6 +22,7 @@ ENV/
 
 # Playwright / browser test artifacts
 videos/
+screenshots/
 test-results/
 playwright-report/
 playwright/.cache/

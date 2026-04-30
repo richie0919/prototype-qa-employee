@@ -15,7 +15,7 @@ VALID_CATEGORIES = [
 
 def explore_category(category=None):
     if category not in VALID_CATEGORIES:
-        category = random.choice(VALID_CATEGORIES)
+        return f"Invalid category '{category}'. Valid options: {', '.join(VALID_CATEGORIES)}"
 
     print(f"🧭 Exploring: {category}")
 

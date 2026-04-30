@@ -15,7 +15,18 @@ from skills.navigation.explore_category import explore_category
 from skills.search.apply_filter import apply_filter
 from skills.search.adjust_slider import adjust_slider
 from skills.compare.add_to_compare import add_to_compare
+from skills.compare.view_compare import view_compare
 from skills.wishlist.add_to_wishlist import add_to_wishlist
+from skills.wishlist.view_wishlist import view_wishlist
+from skills.product.get_product_details import get_product_details
+from skills.product.click_supplier import click_supplier
+from skills.search.get_results_count import get_results_count
+from skills.search.sort_results import sort_results
+from skills.search.clear_filters import clear_filters
+from skills.navigation.go_back import go_back
+from skills.navigation.check_pagination import check_pagination
+from skills.validation.assert_text_visible import assert_text_visible
+from skills.validation.take_screenshot import take_screenshot
 
 
 def open_site(url=None, site="prod"):
@@ -39,7 +50,18 @@ SKILLS = {
     "apply_filter": apply_filter,
     "adjust_slider": adjust_slider,
     "add_to_compare": add_to_compare,
+    "view_compare": view_compare,
     "add_to_wishlist": add_to_wishlist,
+    "view_wishlist": view_wishlist,
+    "get_product_details": get_product_details,
+    "click_supplier": click_supplier,
+    "get_results_count": get_results_count,
+    "sort_results": sort_results,
+    "clear_filters": clear_filters,
+    "go_back": go_back,
+    "check_pagination": check_pagination,
+    "assert_text_visible": assert_text_visible,
+    "take_screenshot": take_screenshot,
     "close_browser": close_browser,
 }
 
@@ -117,49 +139,89 @@ Avoid repeating actions.
         print("🧠 RAW:", response, flush=True)
 
         # ----------------------------------
-        # 🔥 DETECTAR JSON EN RESPUESTA DEL LLM
+        # 🔥 DETECT JSON IN LLM RESPONSE
         # ----------------------------------
         try:
             actions = extract_all_json(response)
             print(f"🎯 Found {len(actions)} action(s)", flush=True)
+        except Exception:
+            actions = None
+
+        if actions:
+            # Remove consecutive duplicate skill calls (same skill + same args back to back)
+            deduped = []
+            for action in actions:
+                if deduped and deduped[-1].get("skill") == action.get("skill") and deduped[-1].get("args") == action.get("args"):
+                    print(f"⏭️ Skipping duplicate skill call: {action.get('skill')}", flush=True)
+                    continue
+                deduped.append(action)
+            actions = deduped
 
             last_result = None
+            skill_names = []
             for action in actions:
                 skill = action.get("skill")
                 args = action.get("args", {})
+                skill_names.append(skill)
 
                 print(f"👉 {skill} | {args}", flush=True)
 
-                if skill in SKILLS:
-                    fn = SKILLS[skill]
-                    # Filtrar solo los args que la función acepta
-                    valid_params = inspect.signature(fn).parameters
-                    filtered_args = {k: v for k, v in args.items() if k in valid_params}
-                    last_result = fn(**filtered_args)
-                else:
-                    last_result = f"Unknown skill: {skill}"
+                try:
+                    if skill in SKILLS:
+                        fn = SKILLS[skill]
+                        valid_params = inspect.signature(fn).parameters
+                        filtered_args = {k: v for k, v in args.items() if k in valid_params}
+                        last_result = fn(**filtered_args)
+                    else:
+                        last_result = f"Unknown skill: {skill}"
 
-                print(f"✅ {skill} result: {last_result}", flush=True)
+                    print(f"✅ {skill} result: {last_result}", flush=True)
 
-                entry = {
-                    "skill": skill,
-                    "args": args,
-                    "result": last_result
-                }
+                    entry = {
+                        "skill": skill,
+                        "args": args,
+                        "result": last_result
+                    }
+                    history.append(entry)
+                    add_entry(persistent_memory, entry)
 
-                history.append(entry)
-                add_entry(persistent_memory, entry)
+                except Exception as skill_err:
+                    last_result = f"Skill '{skill}' failed: {skill_err}"
+                    print(f"⚠️ {last_result}", flush=True)
+                    history.append({"skill": skill, "args": args, "result": last_result})
 
             # Auto-close: if close_browser was not called, close and attach video
-            skill_names = [a.get("skill") for a in actions]
             if "close_browser" not in skill_names:
                 video_result = close_browser()
                 print(f"🎬 Auto-close: {video_result}", flush=True)
-                if video_result and "http" in str(video_result):
-                    last_result = f"{last_result}\n\n{video_result}"
+            else:
+                video_result = last_result  # close_browser was called, its result is already in last_result
 
-            # Ask the LLM to format the result in the user's language
-            # and render any video URL as a markdown hyperlink with a title
+            # Programmatically extract screenshot and video URLs — never trust the LLM to pick the right one
+            import re as _re
+
+            screenshot_url = None
+            video_url = None
+
+            # Scan all history entries for a screenshot URL
+            for entry in history:
+                m = _re.search(r'https?://\S+/screenshots/\S+\.png', str(entry.get("result", "")))
+                if m:
+                    screenshot_url = m.group(0).rstrip(')')
+
+            # Extract video URL from video_result
+            if video_result:
+                m = _re.search(r'https?://\S+/videos/\S+\.webm', str(video_result))
+                if m:
+                    video_url = m.group(0).rstrip(')')
+
+            # Build explicit attachment lines so the LLM has nothing to invent
+            media_block = ""
+            if screenshot_url:
+                media_block += f"\n![Screenshot]({screenshot_url})"
+            if video_url:
+                media_block += f"\n[Test recording]({video_url})"
+
             summary_messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input},
@@ -167,15 +229,15 @@ Avoid repeating actions.
                     "role": "system",
                     "content": (
                         f"Skills executed: {', '.join(str(s) for s in skill_names)}\n"
-                        f"Raw results: {last_result}\n\n"
+                        f"Page visited: {next((e.get('result','') for e in history if e.get('skill') == 'validate_page'), 'unknown')}\n\n"
                         "Write a brief, friendly summary to the user in the SAME language they used above. "
-                        "If the raw results contain a video URL (starting with http), format it as a "
-                        "markdown hyperlink with a descriptive title, e.g. [Test recording](url). "
+                        "Do NOT include any URLs, file names, markdown links, or markdown images — those will be appended automatically after your text. "
                         "Keep it short and natural. Do NOT output JSON."
                     )
                 }
             ]
-            last_result = ask_llm(summary_messages)
+            summary_text = ask_llm(summary_messages)
+            last_result = summary_text.strip() + media_block
             print(f"📝 Formatted result: {last_result}", flush=True)
 
             return {
@@ -184,11 +246,6 @@ Avoid repeating actions.
                 "result": last_result,
                 "history": history
             }
-
-        except Exception as e:
-            import traceback
-            print(f"⚠️ JSON parse error: {e}", flush=True)
-            print(traceback.format_exc(), flush=True)
 
         # ----------------------------------
         # 💬 CHAT NORMAL (DEFAULT)

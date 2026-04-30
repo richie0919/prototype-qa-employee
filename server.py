@@ -1,4 +1,6 @@
 import os
+import re
+import base64
 import asyncio
 from flask import Flask, request, Response, send_from_directory
 
@@ -6,8 +8,10 @@ from dotenv import load_dotenv
 from botbuilder.core import (
     BotFrameworkAdapter,
     BotFrameworkAdapterSettings,
+    MessageFactory,
     TurnContext,
 )
+from botbuilder.schema import Attachment
 from botbuilder.schema import Activity
 
 from main import run_agent_step
@@ -74,7 +78,32 @@ def messages():
 
         print("🤖 Reply:", reply)
 
-        await turn_context.send_activity(reply)
+        # Extract screenshot URLs — match both ![alt](url) and [alt](url) for /screenshots/ paths
+        image_pattern = re.compile(r'!?\[([^\]]*)\]\((https?://[^)]*screenshots[^)]+)\)')
+        images = image_pattern.findall(reply)
+        clean_reply = image_pattern.sub('', reply).strip()
+
+        await turn_context.send_activity(clean_reply)
+
+        for alt, url in images:
+            # Resolve to local file for reliable Teams rendering
+            local_path = None
+            if '/screenshots/' in url:
+                filename = url.split('/screenshots/')[-1]
+                local_path = os.path.join(os.path.dirname(__file__), 'screenshots', filename)
+
+            if local_path and os.path.exists(local_path):
+                with open(local_path, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                content_url = f"data:image/png;base64,{image_data}"
+                content_type = "image/png"
+            else:
+                content_url = url
+                ext = url.split('.')[-1].split('?')[0].lower()
+                content_type = f"image/{ext}" if ext in ('png', 'jpg', 'jpeg', 'gif', 'webp') else "image/png"
+
+            attachment = Attachment(content_type=content_type, content_url=content_url, name=alt or "screenshot")
+            await turn_context.send_activity(MessageFactory.attachment(attachment))
 
     # 🔥 Flask no es async → creamos loop
     loop = asyncio.new_event_loop()
@@ -129,12 +158,20 @@ def serve_video(filename):
 
 
 # -----------------------------
+# 📸 SCREENSHOTS
+# -----------------------------
+SCREENSHOTS_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
+
+@app.route("/screenshots/<path:filename>", methods=["GET"])
+def serve_screenshot(filename):
+    return send_from_directory(SCREENSHOTS_DIR, filename)
+
+
+# -----------------------------
 # 🚀 RUN
 # -----------------------------
 if __name__ == "__main__":
     print("🚀 Server running on http://localhost:8000")
-    print("🔐 APP_ID:", APP_ID if APP_ID else "EMPTY (dev mode)")
-    print("🏢 TENANT:", TENANT_ID if TENANT_ID else "EMPTY")
 
     app.run(
         host="0.0.0.0",
