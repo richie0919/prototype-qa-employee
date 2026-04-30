@@ -27,7 +27,7 @@ TENANT_ID = os.getenv("MICROSOFT_TENANT_ID", "")
 adapter_settings = BotFrameworkAdapterSettings(
     app_id=APP_ID,
     app_password=APP_PASSWORD,
-    channel_auth_tenant=TENANT_ID  # opcional pero recomendado
+    channel_auth_tenant=TENANT_ID  # optional but recommended
 )
 
 adapter = BotFrameworkAdapter(adapter_settings)
@@ -37,7 +37,7 @@ adapter = BotFrameworkAdapter(adapter_settings)
 # -----------------------------
 app = Flask(__name__)
 
-# memoria simple por usuario
+# simple per-user session memory
 sessions = {}
 
 
@@ -66,7 +66,7 @@ def messages():
 
         sessions[user_id] = result["history"]
 
-        # 🔥 respuesta inteligente
+        # 🔥 build reply
         if result["type"] == "chat":
             reply = result["response"]
         else:

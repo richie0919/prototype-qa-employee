@@ -19,7 +19,7 @@ from skills.wishlist.add_to_wishlist import add_to_wishlist
 
 
 def open_site(url=None, site="prod"):
-    """Alias flexible: acepta url directa o delega a open_home con site=prod/beta."""
+    """Flexible alias: accepts a direct URL or delegates to open_home with site=prod/beta."""
     if url:
         from browser.seesion import get_page
         page = get_page()
@@ -93,7 +93,7 @@ def run_agent_step(user_input, history=None):
 
     persistent_memory = load_memory()
 
-    # contexto memoria
+    # memory context
     memory_text = "\n".join(
         [f"{h['skill']} -> {h['result']}" for h in history[-5:]]
     )
@@ -150,13 +150,33 @@ Avoid repeating actions.
                 history.append(entry)
                 add_entry(persistent_memory, entry)
 
-            # 🔥 Auto-cierre: si no se llamó close_browser, cerramos y devolvemos el video
+            # Auto-close: if close_browser was not called, close and attach video
             skill_names = [a.get("skill") for a in actions]
             if "close_browser" not in skill_names:
                 video_result = close_browser()
                 print(f"🎬 Auto-close: {video_result}", flush=True)
                 if video_result and "http" in str(video_result):
-                    last_result = f"{last_result}\n\n🎬 {video_result}"
+                    last_result = f"{last_result}\n\n{video_result}"
+
+            # Ask the LLM to format the result in the user's language
+            # and render any video URL as a markdown hyperlink with a title
+            summary_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input},
+                {
+                    "role": "system",
+                    "content": (
+                        f"Skills executed: {', '.join(str(s) for s in skill_names)}\n"
+                        f"Raw results: {last_result}\n\n"
+                        "Write a brief, friendly summary to the user in the SAME language they used above. "
+                        "If the raw results contain a video URL (starting with http), format it as a "
+                        "markdown hyperlink with a descriptive title, e.g. [Test recording](url). "
+                        "Keep it short and natural. Do NOT output JSON."
+                    )
+                }
+            ]
+            last_result = ask_llm(summary_messages)
+            print(f"📝 Formatted result: {last_result}", flush=True)
 
             return {
                 "type": "action",

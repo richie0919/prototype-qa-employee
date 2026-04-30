@@ -10,6 +10,6 @@ def close_browser():
         filename = os.path.basename(video_path)
         base_url = os.getenv("PUBLIC_URL", "http://localhost:8000")
         video_url = f"{base_url}/videos/{filename}"
-        return f"Test finalizado. Video: {video_url}"
+        return f"Browser closed. Video: {video_url}"
 
     return "Browser closed"
